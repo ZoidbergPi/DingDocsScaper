@@ -4,6 +4,7 @@ import time
 import traceback
 import os
 from threading import Thread
+import re
 
 import requests
 from DrissionPage import ChromiumPage, ChromiumOptions
@@ -184,6 +185,7 @@ class Processer:
         if load_page:
             self.page.get(f"https://alidocs.dingtalk.com/i/nodes/{node_uuid}")
         self.block_wait()
+        # 判断是否页面白屏
         if node_info.get('contentType') == 'alidoc' or node_info.get('dentryType') == 'file':
             logger.info(f"[{self.idx}] {node_name}是文件，继续处理")
             success = self.process_file(node_info)
@@ -195,12 +197,6 @@ class Processer:
             try:
                 item = self.scroll_to_see(find_div)
                 self.to_item(item)
-                # 如果有展开按钮，就点击展开(废弃，通过URL跳转会自动展开)
-                # time.sleep(0.5)
-                # click_areas = item.eles("@data-testid=expand-click-area")
-                # if click_areas:
-                #     click_areas[0].click()
-                #     time.sleep(2)
             except Exception as e:
                 logger.info(f"[{self.idx}] {find_div}: {e} {traceback.format_exc()}")
                 self.process_node(node_info, load_page=False)
@@ -282,14 +278,14 @@ class Processer:
     def process_file(self, node_info, retry_times=0):
         def c(x):
             x = (x or "").replace('\\', '_').replace(' ', '_').replace(':', '_')
-            x = x.replace('/', '_').replace('?', '_').replace("*","_")
-            for bi in r' / \ : * ? " < > |'.split():
-                x = x.replace(bi, "_")
+            x = x.replace('/', '_').replace('?', '_').replace("*", "_")
+            x = x.replace('\n', '_').strip()
+            x = re.sub(r"(?u)[^-\w.]", "", x)
             return x
         node_name = node_info['name']
         file_type = node_name.split(".")[-1]
         node_uuid = node_info['dentryUuid']
-        ancestor_path = [x['name'] for x in node_info['ancestorList']]
+        ancestor_path = [c(x['name']) for x in node_info['ancestorList']]
         if node_uuid in proceed_files:
             return True
         proceed_files.add(node_uuid)
@@ -320,7 +316,15 @@ class Processer:
             item.click()
         except Exception as e:
             logger.info(f"[{self.idx}] {find_div}: {e}")
-            return self.process_file(node_info,retry_times+1)
+            return self.process_file(node_info, retry_times+1)
+        # 判断是否无权限访问
+        notice_eles = self.page.eles("@data-item-key=apply-title-view") or []
+        for ne in notice_eles:
+            if "暂无权限访问" in str(ne.text):
+                no_right_files.append((file_path, node_name, file_type))
+                logger.info(f"[{self.idx}] 节点：{node_name} 无访问权限，跳过")
+                return True
+
         # 如果是链接
         if file_type == "dlink":
             file_type = node_info['linkSourceInfo']['extension']
@@ -332,7 +336,6 @@ class Processer:
         try:
             download_task = False
             last_err = None
-            is_unproceed= False
             if "adoc" in file_type:
                 limited_toolbar = self.page.eles("@data-testid=doc-header-more-button", timeout=2)
                 if limited_toolbar:
@@ -346,7 +349,8 @@ class Processer:
                             download_task = self.page.wait.download_begin(timeout=120)
                             last_err = None
                             break
-                        except Exception as last_err:
+                        except Exception as err: 
+                            last_err = err
                             time.sleep(3)
                             continue
                 else:
@@ -366,7 +370,8 @@ class Processer:
                                 download_task = self.page.wait.download_begin(timeout=120)
                                 last_err = None
                                 break
-                        except Exception as last_err:
+                        except Exception as err: 
+                            last_err = err
                             time.sleep(3)
                             continue
                     else:
@@ -384,7 +389,8 @@ class Processer:
                             download_task = self.page.wait.download_begin(timeout=120)
                             last_err = None
                             break
-                        except Exception as last_err:
+                        except Exception as err: 
+                            last_err = err
                             time.sleep(3)
                             continue
                 else:
@@ -403,7 +409,8 @@ class Processer:
                                 download_task = self.page.wait.download_begin(timeout=120)
                                 last_err = None
                                 break
-                        except Exception as last_err:
+                        except Exception as err: 
+                            last_err = err
                             time.sleep(3)
                             continue
                     else:
@@ -418,7 +425,8 @@ class Processer:
                                     break
                                 else:
                                     no_right_files.append((file_path, node_name, file_type))
-                            except Exception as last_err:
+                            except Exception as err: 
+                                last_err = err
                                 time.sleep(3)
                                 continue
 
@@ -480,7 +488,4 @@ if __name__ == "__main__":
         time.sleep(10)
     print(f"无权限文件的列表\n{no_right_files}")
     input("全部抓取完成，任意键退出")
-
-
-
 
