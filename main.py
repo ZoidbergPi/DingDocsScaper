@@ -216,7 +216,7 @@ class Processer:
                 logger.info(f"[{self.idx}] {find_div}: {e} {traceback.format_exc()}")
                 self.process_node(node_info, load_page=False)
     def to_item(self, item):
-        item_loc = item.location
+        item_loc = item.rect.location
         self.page.scroll.to_location(item_loc[0], item_loc[1])
 
     def check_alert(self):
